@@ -4,9 +4,10 @@ from torch import nn
 from torch import optim
 from torch.nn import functional as F
 
-from model import Model
+from model import Critic
 from buffer import ReplayBuffer, PrioritizedReplayBuffer
 
+# TODO Better handling of hyperparameters (preferably some args dict that can be used for both DQN and SMIRL)
 
 class DQNAgent:
     def __init__(self, obs_space, num_actions, lr=1e-4, soft_update=None, gamma=0.99,
@@ -15,8 +16,8 @@ class DQNAgent:
         self.update_freq = update_freq
         self.obs_shape = obs_space.shape
         self.num_actions = num_actions.n
-        self.Q = Model(obs_space, num_actions)
-        self.target_Q = Model(obs_space, num_actions)
+        self.Q = Critic(obs_space, num_actions)
+        self.target_Q = Critic(obs_space, num_actions)
         self.target_Q.load_state_dict(self.Q.state_dict())
         self.eps_decay = eps_decay
         self.eps = 1
@@ -26,9 +27,9 @@ class DQNAgent:
         self.batch_size = batch_size
         self.step = 0
         if capacity is None:
-            self.buffer = buffer(self.obs_shape)
+            self.buffer = buffer(obs_space)
         else:
-            self.buffer = buffer(self.obs_shape, capacity)
+            self.buffer = buffer(obs_space, capacity)
         self.optim = optim.Adam(self.Q.parameters(), lr=lr)
         self.start_after = start_after
         self.target_update_freq = target_update_freq

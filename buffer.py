@@ -5,10 +5,10 @@ class ReplayBuffer:
     def __init__(self, obs_space, capacity=1_000_000):
         self.capacity = capacity
         self.current_size = 0
-        self.obs = np.empty((capacity, *obs_space))
+        self.obs = np.empty((capacity, *obs_space.shape), dtype=obs_space.dtype)
         self.action = np.empty((capacity))
         self.reward = np.empty((capacity))
-        self.next_obs = np.empty((capacity, *obs_space))
+        self.next_obs = np.empty((capacity, *obs_space.shape), dtype=obs_space.dtype)
         self.done = np.empty((capacity))
 
     def sample(self, batch_size):

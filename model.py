@@ -5,38 +5,137 @@ import gymnasium as gym
 from gymnasium import spaces
 
 
-class Model(nn.Module):
+def compute_output_dim(conv, input_shape):
+    test_tensor = torch.zeros(size=input_shape)
+    test_output = conv(test_tensor)
+    return test_output.flatten().shape[0], test_output.shape
+
+
+def get_preprocessor(input_shape):
+    if len(input_shape) == 3:
+        # is image
+        preprocessor = nn.Sequential(
+            nn.Conv2d(input_shape[0], 16, (8, 8), stride=2),
+            nn.ReLU(),
+            nn.Conv2d(16, 32, (4, 4), stride=2),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, (4, 4), stride=2),
+            nn.ReLU(),
+        )
+        out_features, output_shape = compute_output_dim(preprocessor, input_shape)
+        preprocessor.append(nn.Flatten(-3, -1))
+    else:
+        # is some flattened state
+        preprocessor = nn.Sequential(
+            nn.Linear(input_shape[0], 64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.ReLU(),
+        )
+        out_features = 64
+        output_shape = 64
+    return preprocessor, out_features, output_shape
+
+
+def get_decoder(input_shape):
+    if len(input_shape) == 3:
+        # is image
+        decoder = nn.Sequential(
+            nn.ConvTranspose2d(64, 32, (4, 4), stride=2, output_padding=1),
+            nn.ReLU(),
+            nn.ConvTranspose2d(32, 16, (4, 4), stride=2, output_padding=1),
+            nn.ReLU(),
+            nn.ConvTranspose2d(16, input_shape[0], (8, 8), stride=2),
+            nn.Sigmoid()
+        )
+    else:
+        # is some flattened state
+        # Will need to change if passing args or doing some other custom models
+        decoder = nn.Sequential(
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            nn.Linear(64, input_shape[0]),
+            nn.Sigmoid()
+        )
+    return decoder
+
+
+class Critic(nn.Module):
     def __init__(self, obs_space, num_actions):
-        super(Model, self).__init__()
-        if len(obs_space.shape) == 3:
-            # is image
-            self.is_image = True
-            self.preprocessor = nn.Sequential(
-                nn.Conv2d(obs_space.shape[0], 16, (8, 8), stride=2),
-                nn.ReLU(),
-                nn.Conv2d(16, 32, (4, 4), stride=2),
-                nn.ReLU(),
-                nn.Conv2d(32, 64, (4, 4), stride=2),
-                nn.ReLU(),
-                nn.Flatten()
-            )
-            test_tensor = torch.zeros(size=obs_space.shape)
-            out_features = self.preprocessor(test_tensor)
-        else:
-            # is some flattened state
-            self.is_image = False
-            self.preprocessor = nn.Sequential(
-                nn.Linear(obs_space.shape[0], 64),
-                nn.ReLU(),
-                nn.Linear(64, 64),
-                nn.ReLU(),
-            )
-            out_features = 64
+        super(Critic, self).__init__()
+        self.preprocessor, out_features, _ = get_preprocessor(obs_space.shape)
 
         self.action = nn.Linear(out_features, num_actions.n)
 
     def forward(self, obs):
         if type(obs) is np.ndarray:
             obs = torch.tensor(obs).float()
-        x = self.preprocessor(obs)
+        x = self.preprocessor(obs / 256)
         return self.action(x)
+
+
+class Encoder(nn.Module):
+    def __init__(self, obs_space, latent_dim=100):
+        super(Encoder, self).__init__()
+        self.preprocessor, self.hidden_dim, _ = get_preprocessor(obs_space.shape)
+        self.mean = nn.Linear(self.hidden_dim, latent_dim)
+        self.log_var = nn.Linear(self.hidden_dim, latent_dim)
+        self.log_var.weight.data.fill_(0)
+
+    def forward(self, obs):
+        if type(obs) is np.ndarray:
+            obs = torch.tensor(obs).float()
+        x = self.preprocessor(obs / 256)
+        mean = self.mean(x)
+        log_var = self.log_var(x)
+
+        return mean, log_var
+
+
+class Decoder(nn.Module):
+    def __init__(self, obs_space, latent_dim=100):
+        super(Decoder, self).__init__()
+        _, hidden_dim, self.output_dim = get_preprocessor(obs_space.shape)
+        self.preprocessor = nn.Sequential(
+            nn.Linear(latent_dim, hidden_dim),
+            nn.ReLU(),
+        )
+        self.decoder = get_decoder(obs_space.shape)
+
+    def forward(self, features):
+        x = self.preprocessor(features)
+        x = x.view(-1, *self.output_dim)
+        return self.decoder(x)
+
+
+class VAE(nn.Module):
+    def __init__(self, obs_space, latent_dim=100):
+        super(VAE, self).__init__()
+        self.encoder = Encoder(obs_space, latent_dim)
+        self.decoder = Decoder(obs_space, latent_dim)
+        self.dist = torch.distributions.Normal
+        self.standard_normal = torch.distributions.Normal(torch.zeros(latent_dim), torch.ones(latent_dim))
+
+    def forward(self, obs):
+        mean, log_var = self.encoder(obs)
+        var = torch.exp(log_var)
+        dist = self.dist(mean, var)
+        x = dist.rsample()
+        x_hat = self.decoder(x)
+        return x_hat, mean, var
+
+    def log_prob(self, obs):
+        mean, log_var = self.encoder(obs)
+        return self.standard_normal.log_prob(self.dist(mean, torch.exp(log_var)).sample()).detach().cpu().numpy()
+
+
+def loss_vae(x, x_hat, mean, var, vae):
+    # TODO: Check if this is better https://www.tensorflow.org/tutorials/generative/cvae
+    dist = vae.dist(mean, var)
+    z = dist.rsample()
+    d_kl = 0.5 * torch.mean(1 + torch.log(var) - mean.pow(2) - var)
+    x = torch.sigmoid(torch.tensor(x / 256).float())
+    log_likehood = nn.functional.binary_cross_entropy(x, x_hat, reduction='mean')
+    pz = vae.standard_normal.log_prob(z).mean()
+    pz_x = dist.log_prob(z).mean()
+    return log_likehood + pz - pz_x #log_likehood - d_kl

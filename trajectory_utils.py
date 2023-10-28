@@ -10,7 +10,9 @@ def generate_trajectory(env, agent):
     while not done:
         timestep += 1
         action = agent.choose_action(obs)
-        next_obs, reward, truncated, _, done = env.step(action)
+        next_obs, reward, truncated, info, done = env.step(action)
+        if type(info) is bool:
+            done, info = info, done
         total_reward += reward
         done = done or truncated
         loss = agent.update(obs, action, reward, next_obs, done)
@@ -27,8 +29,10 @@ def evaluate_trajectory(env, agent):
     done = False
     total_reward = 0
     while not done:
-        action = agent.choose_action(obs, False)
-        next_obs, reward, truncated, _, done = env.step(action)
+        action = agent.choose_action(obs, explore=False)
+        next_obs, reward, truncated, info, done = env.step(action)
+        if type(info) is bool:
+            done, info = info, done
         total_reward += reward
         done = done or truncated
         obs = next_obs

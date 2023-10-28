@@ -4,14 +4,16 @@ from torch import nn
 import gymnasium as gym
 from gymnasium import spaces
 
+cuda_available = "cuda" if torch.cuda.is_available() else "cpu"
 
-def compute_output_dim(conv, input_shape):
-    test_tensor = torch.zeros(size=input_shape)
-    test_output = conv(test_tensor)
+
+def compute_output_dim(conv, input_shape, device):
+    test_tensor = torch.zeros(size=input_shape).to(device)
+    test_output = conv(test_tensor).cpu()
     return test_output.flatten().shape[0], test_output.shape
 
 
-def get_preprocessor(input_shape):
+def get_preprocessor(input_shape, device):
     if len(input_shape) == 3:
         # is image
         preprocessor = nn.Sequential(
@@ -21,8 +23,8 @@ def get_preprocessor(input_shape):
             nn.ReLU(),
             nn.Conv2d(32, 64, (4, 4), stride=2),
             nn.ReLU(),
-        )
-        out_features, output_shape = compute_output_dim(preprocessor, input_shape)
+        ).to(device)
+        out_features, output_shape = compute_output_dim(preprocessor, input_shape, device)
         preprocessor.append(nn.Flatten(-3, -1))
     else:
         # is some flattened state
@@ -31,13 +33,13 @@ def get_preprocessor(input_shape):
             nn.ReLU(),
             nn.Linear(64, 64),
             nn.ReLU(),
-        )
+        ).to(device)
         out_features = 64
         output_shape = 64
     return preprocessor, out_features, output_shape
 
 
-def get_decoder(input_shape):
+def get_decoder(input_shape, device):
     if len(input_shape) == 3:
         # is image
         decoder = nn.Sequential(
@@ -47,7 +49,7 @@ def get_decoder(input_shape):
             nn.ReLU(),
             nn.ConvTranspose2d(16, input_shape[0], (8, 8), stride=2),
             nn.Sigmoid()
-        )
+        ).to(device)
     else:
         # is some flattened state
         # Will need to change if passing args or doing some other custom models
@@ -56,20 +58,23 @@ def get_decoder(input_shape):
             nn.ReLU(),
             nn.Linear(64, input_shape[0]),
             nn.Sigmoid()
-        )
+        ).to(device)
     return decoder
 
 
 class Critic(nn.Module):
-    def __init__(self, obs_space, num_actions):
+    def __init__(self, obs_space, num_actions, use_gpu_if_available=True):
         super(Critic, self).__init__()
-        self.preprocessor, out_features, _ = get_preprocessor(obs_space.shape)
+        self.use_gpu_if_available = use_gpu_if_available
+        self.device = cuda_available if self.use_gpu_if_available else "cpu"
 
-        self.action = nn.Linear(out_features, num_actions.n)
+        self.preprocessor, out_features, _ = get_preprocessor(obs_space.shape, self.device)
+
+        self.action = nn.Linear(out_features, num_actions.n).to(self.device)
 
     def forward(self, obs):
         if type(obs) is np.ndarray:
-            obs = torch.tensor(obs).float()
+            obs = torch.tensor(obs).float().to(self.device)
 
         if len(obs.shape) > 3:
             obs /= 256
@@ -78,16 +83,19 @@ class Critic(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, obs_space, latent_dim=100):
+    def __init__(self, obs_space, latent_dim=100, use_gpu_if_available=True):
         super(Encoder, self).__init__()
-        self.preprocessor, self.hidden_dim, _ = get_preprocessor(obs_space.shape)
-        self.mean = nn.Linear(self.hidden_dim, latent_dim)
-        self.log_var = nn.Linear(self.hidden_dim, latent_dim)
+        self.use_gpu_if_available = use_gpu_if_available
+        self.device = cuda_available if self.use_gpu_if_available else "cpu"
+
+        self.preprocessor, self.hidden_dim, _ = get_preprocessor(obs_space.shape, self.device)
+        self.mean = nn.Linear(self.hidden_dim, latent_dim).to(self.device)
+        self.log_var = nn.Linear(self.hidden_dim, latent_dim).to(self.device)
         self.log_var.weight.data.fill_(0)
 
     def forward(self, obs):
         if type(obs) is np.ndarray:
-            obs = torch.tensor(obs).float()
+            obs = torch.tensor(obs).float().to(self.device)
 
         if len(obs.shape) > 3:
             obs /= 256
@@ -99,14 +107,17 @@ class Encoder(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, obs_space, latent_dim=100):
+    def __init__(self, obs_space, latent_dim=100, use_gpu_if_available=True):
         super(Decoder, self).__init__()
-        _, hidden_dim, self.output_dim = get_preprocessor(obs_space.shape)
+        self.use_gpu_if_available = use_gpu_if_available
+        self.device = cuda_available if self.use_gpu_if_available else "cpu"
+
+        _, hidden_dim, self.output_dim = get_preprocessor(obs_space.shape, "cpu")
         self.preprocessor = nn.Sequential(
             nn.Linear(latent_dim, hidden_dim),
             nn.ReLU(),
-        )
-        self.decoder = get_decoder(obs_space.shape)
+        ).to(self.device)
+        self.decoder = get_decoder(obs_space.shape, self.device)
 
     def forward(self, features):
         x = self.preprocessor(features)
@@ -118,10 +129,10 @@ class Decoder(nn.Module):
 
 
 class VAE(nn.Module):
-    def __init__(self, obs_space, latent_dim=100):
+    def __init__(self, obs_space, latent_dim=100, use_gpu_if_available=True):
         super(VAE, self).__init__()
-        self.encoder = Encoder(obs_space, latent_dim)
-        self.decoder = Decoder(obs_space, latent_dim)
+        self.encoder = Encoder(obs_space, latent_dim, use_gpu_if_available)
+        self.decoder = Decoder(obs_space, latent_dim, use_gpu_if_available)
         self.dist = torch.distributions.Normal
         self.standard_normal = torch.distributions.Normal(torch.zeros(latent_dim), torch.ones(latent_dim))
 
@@ -148,4 +159,4 @@ def loss_vae(x, x_hat, mean, var, vae):
     mse_loss = nn.functional.mse_loss(x, x_hat, reduction='sum')
     pz = vae.standard_normal.log_prob(z).mean()
     pz_x = dist.log_prob(z).mean()
-    return mse_loss - d_kl #log_likehood - pz - pz_x
+    return mse_loss - d_kl  # log_likehood - pz - pz_x

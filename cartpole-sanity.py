@@ -5,6 +5,7 @@ from matplotlib import pyplot as plt
 from trajectory_utils import generate_trajectory, evaluate_trajectory
 
 env = gym.make("CartPole-v1")
+render_env = gym.make("CartPole-v1", render_mode="human")
 obs_space = env.observation_space
 num_actions = env.action_space
 dqn = DQNAgent(obs_space, num_actions, capacity=100000, eps_decay=0.99, soft_update=None, lr=1e-3, update_freq=1,
@@ -18,7 +19,7 @@ for ep in range(30000):
     timestep += info["timestep"]
     losses.append(info["loss"])
     if ep % 100 == 0:
-        total_reward = evaluate_trajectory(env, dqn)
+        total_reward = evaluate_trajectory(render_env, dqn, render=True)
         print(f"Episode {ep}: Reward {total_reward} Timestep {timestep}")
         rewards.append(total_reward)
 

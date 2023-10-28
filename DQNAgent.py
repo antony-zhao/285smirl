@@ -7,21 +7,21 @@ from torch.nn import functional as F
 from model import Critic
 from buffer import ReplayBuffer, PrioritizedReplayBuffer
 
+
 # TODO Better handling of hyperparameters (preferably some args dict that can be used for both DQN and SMIRL)
 
 class DQNAgent:
     def __init__(self, obs_space, num_actions, lr=1e-4, soft_update=None, gamma=0.99,
                  eps_decay=0.99, buffer=ReplayBuffer, capacity=None, batch_size=256, update_freq=4,
-                 start_after=5000, eps_min=0.1, target_update_freq=10000):
+                 start_after=5000, eps_min=0.1, target_update_freq=10000, eps_decay_per=1000):
         self.update_freq = update_freq
         self.obs_shape = obs_space.shape
         self.num_actions = num_actions.n
         self.Q = Critic(obs_space, num_actions)
         self.target_Q = Critic(obs_space, num_actions)
         self.target_Q.load_state_dict(self.Q.state_dict())
-        self.eps_decay = eps_decay
-        self.eps = 1
-        self.eps_min = eps_min
+        self.eps_decay = lambda step: max(eps_decay ** (step // eps_decay_per), eps_min)
+
         self.gamma = gamma
         self.tau = soft_update
         self.batch_size = batch_size
@@ -35,8 +35,9 @@ class DQNAgent:
         self.target_update_freq = target_update_freq
         self.loss = nn.MSELoss()
 
-    def choose_action(self, obs, eps=0.1):
-        if np.random.rand() > eps:
+    def choose_action(self, obs, explore=True):
+        eps = self.eps_decay(self.step)
+        if np.random.rand() > eps or explore is False:
             qa_values = self.Q(obs)
             qa_values = qa_values.detach().cpu().numpy()
             return np.argmax(qa_values)
@@ -88,3 +89,6 @@ class DQNAgent:
         if self.step % self.update_freq == 0 and self.step > self.start_after:
             loss = self.update_Q()
             return loss
+
+    def epsilon(self, epoch):
+        self.eps = np.max(self.eps_min, self.eps_decay ** epoch)

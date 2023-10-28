@@ -70,7 +70,10 @@ class Critic(nn.Module):
     def forward(self, obs):
         if type(obs) is np.ndarray:
             obs = torch.tensor(obs).float()
-        x = self.preprocessor(obs / 256)
+
+        if len(obs.shape) > 3:
+            obs /= 256
+        x = self.preprocessor(obs)
         return self.action(x)
 
 
@@ -85,7 +88,10 @@ class Encoder(nn.Module):
     def forward(self, obs):
         if type(obs) is np.ndarray:
             obs = torch.tensor(obs).float()
-        x = self.preprocessor(obs / 256)
+
+        if len(obs.shape) > 3:
+            obs /= 256
+        x = self.preprocessor(obs)
         mean = self.mean(x)
         log_var = self.log_var(x)
 
@@ -104,7 +110,10 @@ class Decoder(nn.Module):
 
     def forward(self, features):
         x = self.preprocessor(features)
-        x = x.view(-1, *self.output_dim)
+        if type(self.output_dim) is int:
+            x = x.view(-1, self.output_dim)
+        else:
+            x = x.view(-1, *self.output_dim)
         return self.decoder(x)
 
 
@@ -133,9 +142,10 @@ def loss_vae(x, x_hat, mean, var, vae):
     # TODO: Check if this is better https://www.tensorflow.org/tutorials/generative/cvae
     dist = vae.dist(mean, var)
     z = dist.rsample()
-    d_kl = 0.5 * torch.mean(1 + torch.log(var) - mean.pow(2) - var)
-    x = torch.sigmoid(torch.tensor(x / 256).float())
-    log_likehood = nn.functional.binary_cross_entropy(x, x_hat, reduction='mean')
+    d_kl = 0.5 * torch.sum(1 + torch.log(var) - mean.pow(2) - var.pow(2))
+    x = torch.sigmoid(torch.tensor(x).float())
+    log_likehood = nn.functional.binary_cross_entropy(x, x_hat, reduction='sum')
+    mse_loss = nn.functional.mse_loss(x, x_hat, reduction='sum')
     pz = vae.standard_normal.log_prob(z).mean()
     pz_x = dist.log_prob(z).mean()
-    return log_likehood + pz - pz_x #log_likehood - d_kl
+    return mse_loss - d_kl #log_likehood - pz - pz_x

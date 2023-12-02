@@ -27,5 +27,20 @@ class ReplayBuffer:
 
 
 class PrioritizedReplayBuffer(ReplayBuffer):
-    def __init__(self):
-        pass
+    def __init__(self, obs_space):
+        super().__init__(obs_space)
+        raise NotImplementedError
+
+
+class SMIRLReplayBuffer(ReplayBuffer):
+    def __init__(self, obs_space, capacity=1_000_000, use_reward=False):
+        super().__init__(obs_space, capacity)
+        self.use_reward = use_reward
+
+    def sample(self, batch_size):
+        ind = np.random.randint(0, self.current_size, size=batch_size) % self.capacity
+        rewards = self.reward[ind] * self.use_reward + self.log_probs(self.next_obs[ind])
+        return self.obs[ind], self.action[ind], rewards, self.next_obs[ind], self.done[ind]
+
+    def log_probs(self, obs):
+        raise NotImplementedError

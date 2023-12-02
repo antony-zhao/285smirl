@@ -5,6 +5,7 @@ class ReplayBuffer:
     def __init__(self, obs_space, capacity=1_000_000):
         self.capacity = capacity
         self.current_size = 0
+        self.obs_dim = obs_space.shape
         self.obs = np.empty((capacity, *obs_space.shape), dtype=obs_space.dtype)
         self.action = np.empty((capacity))
         self.reward = np.empty((capacity))
@@ -44,3 +45,26 @@ class SMIRLReplayBuffer(ReplayBuffer):
 
     def log_probs(self, obs):
         raise NotImplementedError
+
+
+class BernoulliBuffer(SMIRLReplayBuffer):
+    def __init__(self, obs_space, capacity=1_000_000, use_reward=False):
+        super().__init__(obs_space, capacity, use_reward)
+        self.threshold = 1e-4
+        self.obs_cum = np.zeros(*obs_space.shape)
+
+    def get_mean(self):
+        mean = self.obs_cum / self.current_size
+        return np.clip(mean, self.threshold, 1-self.threshold)
+
+    def log_probs(self, obs):
+        theta = self.get_mean()
+        prob = theta * obs - (1 - theta) * obs
+
+        log_prob = np.sum(np.log(prob), axis=0)
+        return log_prob
+
+    def insert(self, obs, action, reward, next_obs, done):
+        self.obs_cum += obs
+        super().insert(obs, action, reward, next_obs, done)
+

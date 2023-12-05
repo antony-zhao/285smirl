@@ -1,5 +1,5 @@
 import gymnasium as gym
-from SMIRLAgent import SMIRLAgent
+from SMIRL_VAEAgent import SMIRL_VAEAgent
 from DQNAgent import DQNAgent
 from matplotlib import pyplot as plt
 from trajectory_utils import generate_trajectory, evaluate_trajectory

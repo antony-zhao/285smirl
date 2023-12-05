@@ -5,7 +5,7 @@ from torch import optim
 from torch.nn import functional as F
 
 from model import Critic, cuda_available
-from buffer import ReplayBuffer, PrioritizedReplayBuffer
+from buffer import ReplayBuffer
 
 
 # TODO Better handling of hyperparameters (preferably some args dict that can be used for both DQN and SMIRL)
@@ -14,12 +14,12 @@ class DQNAgent:
     def __init__(self, obs_space, num_actions, lr=1e-4, soft_update=None, gamma=0.99,
                  eps_decay=0.99, buffer=ReplayBuffer, capacity=None, batch_size=256, update_freq=4,
                  start_after=5000, eps_min=0.1, target_update_freq=10000, eps_decay_per=1000,
-                 use_gpu_if_available=True):
+                 use_gpu_if_available=True, filters=None):
         self.update_freq = update_freq
         self.obs_shape = obs_space.shape
         self.num_actions = num_actions.n
-        self.Q = Critic(obs_space, num_actions, use_gpu_if_available)
-        self.target_Q = Critic(obs_space, num_actions, use_gpu_if_available)
+        self.Q = Critic(obs_space, num_actions, use_gpu_if_available, filters)
+        self.target_Q = Critic(obs_space, num_actions, use_gpu_if_available, filters)
 
         self.device = cuda_available if use_gpu_if_available else "cpu"
         self.target_Q.load_state_dict(self.Q.state_dict())

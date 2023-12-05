@@ -13,17 +13,26 @@ def compute_output_dim(conv, input_shape, device):
     return test_output.flatten().shape[0], test_output.shape
 
 
-def get_preprocessor(input_shape, device):
+def get_preprocessor(input_shape, device, filters=None):
     if len(input_shape) == 3:
         # is image
-        preprocessor = nn.Sequential(
-            nn.Conv2d(input_shape[0], 16, (8, 8), stride=2),
-            nn.ReLU(),
-            nn.Conv2d(16, 32, (4, 4), stride=2),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, (4, 4), stride=2),
-            nn.ReLU(),
-        ).to(device)
+        if filters is None:
+            preprocessor = nn.Sequential(
+                nn.Conv2d(input_shape[0], 16, (8, 8), stride=2),
+                nn.ReLU(),
+                nn.Conv2d(16, 32, (4, 4), stride=2),
+                nn.ReLU(),
+                nn.Conv2d(32, 64, (4, 4), stride=2),
+                nn.ReLU()
+            ).to(device)
+        else:
+            filter_list = [nn.Conv2d(input_shape[0], out_channels=filters[0][0],
+                                     kernel_size=(filters[0][1], filters[0][1]), stride=2), nn.ReLU()]
+            for i in range(1, len(filters)):
+                filter_list += [nn.Conv2d(filters[i - 1][0], out_channels=filters[i][0],
+                                          kernel_size=(filters[i][1], filters[i][1]), stride=2), nn.ReLU()]
+
+            preprocessor = nn.Sequential(*filter_list).to(device)
         out_features, output_shape = compute_output_dim(preprocessor, input_shape, device)
         preprocessor.append(nn.Flatten(-3, -1))
     else:
@@ -63,12 +72,12 @@ def get_decoder(input_shape, device):
 
 
 class Critic(nn.Module):
-    def __init__(self, obs_space, num_actions, use_gpu_if_available=True):
+    def __init__(self, obs_space, num_actions, use_gpu_if_available=True, filters=None):
         super(Critic, self).__init__()
         self.use_gpu_if_available = use_gpu_if_available
         self.device = cuda_available if self.use_gpu_if_available else "cpu"
 
-        self.preprocessor, out_features, _ = get_preprocessor(obs_space.shape, self.device)
+        self.preprocessor, out_features, _ = get_preprocessor(obs_space.shape, self.device, filters)
 
         self.action = nn.Linear(out_features, num_actions.n).to(self.device)
 

@@ -2,7 +2,7 @@ import numpy as np
 
 
 class ReplayBuffer:
-    def __init__(self, obs_space, capacity=1_000_000):
+    def __init__(self, obs_space, capacity=1_000_000, normalize_rewards=False):
         self.capacity = capacity
         self.current_size = 0
         self.obs_dim = obs_space.shape
@@ -11,6 +11,7 @@ class ReplayBuffer:
         self.reward = np.empty((capacity))
         self.next_obs = np.empty((capacity, *obs_space.shape), dtype=obs_space.dtype)
         self.done = np.empty((capacity))
+        self.normalize_rewards = normalize_rewards
 
     def sample(self, batch_size):
         ind = np.random.randint(0, self.current_size, size=batch_size) % self.capacity
@@ -51,7 +52,7 @@ class BernoulliBuffer(SMIRLReplayBuffer):
     def __init__(self, obs_space, capacity=1_000_000, use_reward=False):
         super().__init__(obs_space, capacity, use_reward)
         self.threshold = 1e-4
-        self.obs_cum = np.zeros(*obs_space.shape)
+        self.obs_cum = np.zeros(obs_space.shape)
 
     def get_mean(self):
         mean = self.obs_cum / self.current_size
@@ -59,9 +60,11 @@ class BernoulliBuffer(SMIRLReplayBuffer):
 
     def log_probs(self, obs):
         theta = self.get_mean()
-        prob = theta * obs - (1 - theta) * obs
+        prob = theta * obs + (1 - theta) * obs
+        prob = prob.reshape(prob.shape[0], -1)
+        prob = np.clip(prob, self.threshold, 1-self.threshold)
 
-        log_prob = np.sum(np.log(prob), axis=0)
+        log_prob = np.mean(np.log(prob), axis=1)
         return log_prob
 
     def insert(self, obs, action, reward, next_obs, done):

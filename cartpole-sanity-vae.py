@@ -1,13 +1,13 @@
 import gymnasium as gym
-from SMIRLAgent import SMIRLAgent
+from SMIRL_VAEAgent import SMIRL_VAEAgent
 from matplotlib import pyplot as plt
 from trajectory_utils import generate_trajectory, evaluate_trajectory
 
 env = gym.make("CartPole-v1")
 obs_space = env.observation_space
 num_actions = env.action_space
-smirl = SMIRLAgent(obs_space, num_actions, capacity=1000000, eps_decay=0.99, soft_update=None, lr=1e-3, update_freq=1,
-                   start_after=10000, batch_size=128, target_update_freq=1000)
+smirl = SMIRL_VAEAgent(obs_space, num_actions, capacity=1000000, eps_decay=0.99, soft_update=None, lr=1e-3, update_freq=1,
+                       start_after=10000, batch_size=128, target_update_freq=1000)
 
 rewards = []
 losses = []

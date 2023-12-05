@@ -38,3 +38,64 @@ def evaluate_trajectory(env, agent):
         obs = next_obs
 
     return total_reward
+
+
+def generate_trajectory_pz(env, agents):
+    obs = env.reset()
+    terminations = {agent: False for agent in env.possible_agents}
+    truncations = {agent: False for agent in env.possible_agents}
+    total_rewards = {agent: 0 for agent in env.possible_agents}
+    losses = [[] for _ in range(len(agents))]
+    timestep = 0
+    while False in terminations.values() and False in truncations.values():
+        action = {}
+        timestep += 1
+        for i, agent in enumerate(env.possible_agents):
+            if truncations[agent] or terminations[agent]:
+                action[agent] = None
+            else:
+                action[agent] = agents[i].choose_action(obs[agent])
+
+        next_obs, reward, terminations, truncations, info = env.step(action)
+
+        for i, agent in enumerate(env.possible_agents):
+            total_rewards[agent] += reward[agent]
+            if not truncations[agent] or terminations[agent]:
+                loss = agents[i].update(obs[agent], action[agent], reward[agent], next_obs[agent],
+                                        terminations[agent] or truncations[agent])
+                if loss is not None:
+                    losses[i].append(loss)
+
+        obs = next_obs
+
+    return {"total_reward": total_rewards, "loss": np.mean(losses), "timestep": timestep}
+
+
+def evaluate_trajectory_pz(env, agents, render=False):
+    obs = env.reset()
+    terminations = {agent: False for agent in env.possible_agents}
+    truncations = {agent: False for agent in env.possible_agents}
+    total_rewards = {agent: 0 for agent in env.possible_agents}
+
+    timestep = 0
+    while False in terminations.values() and False in truncations.values():
+        if render:
+            env.render()
+        action = {}
+        timestep += 1
+        for i, agent in enumerate(env.possible_agents):
+            if truncations[agent] or terminations[agent]:
+                action[agent] = None
+            else:
+                action[agent] = agents[i].choose_action(obs[agent])
+
+        next_obs, reward, terminations, truncations, info = env.step(action)
+
+        for i, agent in enumerate(env.possible_agents):
+            total_rewards[agent] += reward[agent]
+
+        obs = next_obs
+    if render:
+        env.close()
+
+    return total_rewards

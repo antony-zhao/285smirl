@@ -27,10 +27,10 @@ def get_preprocessor(input_shape, device, filters=None):
             ).to(device)
         else:
             filter_list = [nn.Conv2d(input_shape[0], out_channels=filters[0][0],
-                                     kernel_size=(filters[0][1], filters[0][1]), stride=2), nn.ReLU()]
+                                     kernel_size=(filters[0][1], filters[0][1]), stride=filters[0][2]), nn.ReLU()]
             for i in range(1, len(filters)):
                 filter_list += [nn.Conv2d(filters[i - 1][0], out_channels=filters[i][0],
-                                          kernel_size=(filters[i][1], filters[i][1]), stride=2), nn.ReLU()]
+                                          kernel_size=(filters[i][1], filters[i][1]), stride=filters[i][2]), nn.ReLU()]
 
             preprocessor = nn.Sequential(*filter_list).to(device)
         out_features, output_shape = compute_output_dim(preprocessor, input_shape, device)
@@ -85,8 +85,6 @@ class Critic(nn.Module):
         if type(obs) is np.ndarray:
             obs = torch.tensor(obs).float().to(self.device)
 
-        if len(obs.shape) > 3:
-            obs /= 256
         x = self.preprocessor(obs)
         return self.action(x)
 

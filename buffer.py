@@ -12,10 +12,16 @@ class ReplayBuffer:
         self.next_obs = np.empty((capacity, *obs_space.shape), dtype=obs_space.dtype)
         self.done = np.empty((capacity))
         self.normalize_rewards = normalize_rewards
+        self.eps = 1e-5
 
     def sample(self, batch_size):
         ind = np.random.randint(0, self.current_size, size=batch_size) % self.capacity
-        return self.obs[ind], self.action[ind], self.reward[ind], self.next_obs[ind], self.done[ind]
+        reward = self.reward[ind]
+        if self.normalize_rewards:
+            mean = self.reward.mean()
+            std = self.reward.std() + self.eps
+            reward = (reward - mean) / std
+        return self.obs[ind], self.action[ind], reward, self.next_obs[ind], self.done[ind]
 
     def insert(self, obs, action, reward, next_obs, done):
         ind = self.current_size % self.capacity
@@ -35,13 +41,15 @@ class PrioritizedReplayBuffer(ReplayBuffer):
 
 
 class SMIRLReplayBuffer(ReplayBuffer):
-    def __init__(self, obs_space, capacity=1_000_000, use_reward=False):
-        super().__init__(obs_space, capacity)
+    def __init__(self, obs_space, capacity=1_000_000, use_reward=False, normalize_rewards=False):
+        super().__init__(obs_space, capacity, normalize_rewards)
         self.use_reward = use_reward
 
     def sample(self, batch_size):
         ind = np.random.randint(0, self.current_size, size=batch_size) % self.capacity
         rewards = self.reward[ind] * self.use_reward + self.log_probs(self.next_obs[ind])
+        if self.normalize_rewards:
+            rewards = (rewards - rewards.mean()) / (rewards.std() + self.eps)
         return self.obs[ind], self.action[ind], rewards, self.next_obs[ind], self.done[ind]
 
     def log_probs(self, obs):
@@ -49,9 +57,10 @@ class SMIRLReplayBuffer(ReplayBuffer):
 
 
 class BernoulliBuffer(SMIRLReplayBuffer):
-    def __init__(self, obs_space, capacity=1_000_000, use_reward=False):
-        super().__init__(obs_space, capacity, use_reward)
+    def __init__(self, obs_space, capacity=1_000_000, use_reward=False, normalize_rewards=False):
+        super().__init__(obs_space, capacity, use_reward, normalize_rewards)
         self.threshold = 1e-4
+        self.reward_thresh = 300
         self.obs_cum = np.zeros(obs_space.shape)
 
     def get_mean(self):

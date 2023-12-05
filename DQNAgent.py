@@ -12,7 +12,7 @@ from buffer import ReplayBuffer
 
 class DQNAgent:
     def __init__(self, obs_space, num_actions, lr=1e-4, soft_update=None, gamma=0.99,
-                 eps_decay=0.99, buffer=ReplayBuffer, capacity=None, batch_size=256, update_freq=4,
+                 eps_decay=0.99, buffer=ReplayBuffer, capacity=None, normalize_rewards=False, batch_size=256, update_freq=4,
                  start_after=5000, eps_min=0.1, target_update_freq=10000, eps_decay_per=1000,
                  use_gpu_if_available=True, filters=None):
         self.update_freq = update_freq
@@ -31,9 +31,9 @@ class DQNAgent:
         self.batch_size = batch_size
         self.step = 0
         if capacity is None:
-            self.buffer = buffer(obs_space)
+            self.buffer = buffer(obs_space, normalize_rewards=normalize_rewards)
         else:
-            self.buffer = buffer(obs_space, capacity)
+            self.buffer = buffer(obs_space, capacity, normalize_rewards=normalize_rewards)
         self.optim = optim.Adam(self.Q.parameters(), lr=lr)
         self.start_after = start_after
         self.target_update_freq = target_update_freq

@@ -1,31 +1,83 @@
+import numpy as np
 from pettingzoo import ParallelEnv
+from buffer import SMIRLBuffer
+from gymnasium.spaces import Box
 
 
-class SoftReset(ParallelEnv):
-    def __init__(self, env, max_timestep=1000):
+def encoded_space(obs_space):
+    shape = obs_space.shape
+    if len(shape) == 1:
+        shape = (shape[0] * 2 + 1,)
+    else:
+        shape = (shape[0] * 2 + 1, shape[1], shape[2])
+    low = np.min(obs_space.low)
+    high = np.max(obs_space.high)
+
+    return Box(low, high, shape=shape)
+
+
+class SMIRLWrapper(ParallelEnv):
+    def __init__(self, env, buffer=SMIRLBuffer, use_reward=False, max_timestep=500, smirl_coeff=1):
         self.env = env
+        old_observation_spaces = self.observation_spaces.copy()
+        for agent in self.possible_agents:
+            self.observation_spaces[agent] = encoded_space(old_observation_spaces[agent])
+        self.buffers = {agent: buffer(old_observation_spaces[agent], smirl_coeff=smirl_coeff)
+                        for agent in self.possible_agents}
         self._max_timestep = max_timestep
-        self._time = max_timestep
+        self._time = 0
+        if type(use_reward) is list:
+            self.use_reward = {agent: use_reward[i] for i, agent in enumerate(self.possible_agents)}
+        else:
+            self.use_reward = use_reward
 
     def __getattr__(self, name: str):
         return getattr(self.env, name)
 
     def step(self, action):
-        self._time -= 1
+        self._time += 1
         next_obs, reward, terminations, truncations, info = self.env.step(action)
-        if False not in terminations.values():
-            next_obs = self.env.reset()
-        terminations = {agent: False for agent in terminations.keys()}
-        if self._time == 0:
+        if self._max_timestep is not None:
+            if False not in terminations.values():
+                next_obs = self.env.reset()
+            terminations = {agent: False for agent in terminations.keys()}
+        for agent in self.possible_agents:
+            info[agent] = {"entropy": -self.buffers[agent].smirl_reward(next_obs[agent])}
+            if type(self.use_reward) is dict:
+                use_reward = self.use_reward[agent]
+            else:
+                use_reward = self.use_reward
+            if use_reward != "only":
+                if use_reward:
+                    reward[agent] += self.buffers[agent].smirl_reward(next_obs[agent])
+                else:
+                    reward[agent] = self.buffers[agent].smirl_reward(next_obs[agent])
+            self.buffers[agent].insert(next_obs[agent])
+        if self._time == self._max_timestep:
             truncations = {agent: True for agent in truncations.keys()}
-        return next_obs, reward, terminations, truncations, info
+        return self.encode_obs(next_obs), reward, terminations, truncations, info
 
     def reset(self, seed=None, options=None):
-        self._time = self._max_timestep
-        return self.env.reset(seed, options)
+        self._time = 0
+        obs = self.env.reset(seed, options)
+        for agent in self.possible_agents:
+            self.buffers[agent].reset()
+            self.buffers[agent].insert(obs[agent])
+        return self.encode_obs(obs)
 
     def close(self):
         self.env.close()
 
     def render(self):
         return self.env.render()
+
+    def encode_obs(self, obs):
+        params = {agent: self.buffers[agent].get_params() for agent in obs.keys()}
+        obs_space = self.buffers[self.possible_agents[0]].obs_space.shape
+        if len(obs_space) == 1:
+            time_obs = self._time
+        else:
+            time_obs = np.ones(shape=(1, obs_space[1], obs_space[2])) * self._time
+
+        obs = {agent: np.concatenate([obs[agent], params[agent], time_obs]) for agent in obs.keys()}
+        return obs

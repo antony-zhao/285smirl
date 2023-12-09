@@ -45,7 +45,7 @@ def generate_trajectory_pz(env, agents):
     terminations = {agent: False for agent in env.possible_agents}
     truncations = {agent: False for agent in env.possible_agents}
     total_rewards = {agent: 0 for agent in env.possible_agents}
-    losses = [[] for _ in range(len(agents))]
+    losses = {agent: [] for agent in env.possible_agents}
     timestep = 0
     while False in terminations.values() and False in truncations.values():
         action = {}
@@ -64,11 +64,12 @@ def generate_trajectory_pz(env, agents):
                 loss = agents[i].update(obs[agent], action[agent], reward[agent], next_obs[agent],
                                         terminations[agent] or truncations[agent])
                 if loss is not None:
-                    losses[i].append(loss)
+                    losses[agent].append(loss)
 
         obs = next_obs
 
-    return {"total_reward": total_rewards, "loss": np.mean(losses), "timestep": timestep}
+    return {"total_reward": total_rewards, "loss": {agent: np.mean(losses[agent]) for agent in env.possible_agents},
+            "timestep": timestep}
 
 
 def evaluate_trajectory_pz(env, agents, render=False):

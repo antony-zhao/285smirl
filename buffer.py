@@ -40,43 +40,56 @@ class PrioritizedReplayBuffer(ReplayBuffer):
         raise NotImplementedError
 
 
-class SMIRLReplayBuffer(ReplayBuffer):
-    def __init__(self, obs_space, capacity=1_000_000, use_reward=False, normalize_rewards=False):
-        super().__init__(obs_space, capacity, normalize_rewards)
-        self.use_reward = use_reward
+class SMIRLBuffer:
+    def __init__(self, obs_space, capacity=1_000_000, reward_thresh=300, smirl_coeff=0.5):
+        self.capacity = capacity
+        self.obs_space = obs_space
+        self.reward_thresh = reward_thresh
+        self.reward_multiplier = smirl_coeff
 
-    def sample(self, batch_size):
-        ind = np.random.randint(0, self.current_size, size=batch_size) % self.capacity
-        rewards = self.reward[ind] * self.use_reward + self.log_probs(self.next_obs[ind])
-        if self.normalize_rewards:
-            rewards = (rewards - rewards.mean()) / (rewards.std() + self.eps)
-        return self.obs[ind], self.action[ind], rewards, self.next_obs[ind], self.done[ind]
+    def insert(self, obs):
+        raise NotImplementedError
 
     def log_probs(self, obs):
         raise NotImplementedError
 
+    def smirl_reward(self, obs):
+        lob_prob = self.log_probs(obs)
+        log_prob = np.clip(lob_prob, -self.reward_thresh, self.reward_thresh)
+        return log_prob * self.reward_multiplier
 
-class BernoulliBuffer(SMIRLReplayBuffer):
-    def __init__(self, obs_space, capacity=1_000_000, use_reward=False, normalize_rewards=False):
-        super().__init__(obs_space, capacity, use_reward, normalize_rewards)
+    def reset(self):
+        raise NotImplementedError
+
+    def get_params(self):
+        raise NotImplementedError
+
+
+class BernoulliBuffer(SMIRLBuffer):
+    def __init__(self, obs_space, capacity=1_000_000, reward_thresh=300, smirl_coeff=0.5):
+        super().__init__(obs_space, capacity, reward_thresh, smirl_coeff)
         self.threshold = 1e-4
-        self.reward_thresh = 300
         self.obs_cum = np.zeros(obs_space.shape)
+        self.current_size = 0
 
     def get_mean(self):
         mean = self.obs_cum / self.current_size
-        return np.clip(mean, self.threshold, 1-self.threshold)
+        return np.clip(mean, self.threshold, 1 - self.threshold)
+
+    def get_params(self):
+        return self.get_mean()
 
     def log_probs(self, obs):
         theta = self.get_mean()
-        prob = theta * obs + (1 - theta) * obs
-        prob = prob.reshape(prob.shape[0], -1)
-        prob = np.clip(prob, self.threshold, 1-self.threshold)
+        prob = theta * obs + (1 - theta) * (1 - obs)
 
-        log_prob = np.mean(np.log(prob), axis=1)
+        log_prob = np.sum(np.log(prob))
         return log_prob
 
-    def insert(self, obs, action, reward, next_obs, done):
+    def insert(self, obs):
         self.obs_cum += obs
-        super().insert(obs, action, reward, next_obs, done)
+        self.current_size += 1
 
+    def reset(self):
+        self.obs_cum = np.zeros(self.obs_space.shape)
+        self.current_size = 0

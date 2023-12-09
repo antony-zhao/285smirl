@@ -10,7 +10,7 @@ BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 GRAY = (128, 128, 128)
 
-size = (400, 500)
+size = (600, 600)
 
 
 class Figure:
@@ -18,14 +18,17 @@ class Figure:
     y = 0
 
     figures = [
-        [[1, 5, 9, 13], [4, 5, 6, 7]],
-        [[4, 5, 9, 10], [2, 6, 5, 9]],
-        [[6, 7, 9, 10], [1, 5, 6, 10]],
-        [[1, 2, 5, 9], [0, 4, 5, 6], [1, 5, 9, 8], [4, 5, 6, 10]],
-        [[1, 2, 6, 10], [5, 6, 7, 9], [2, 6, 10, 11], [3, 5, 6, 7]],
-        [[1, 4, 5, 6], [1, 4, 5, 9], [4, 5, 6, 9], [1, 5, 6, 9]],
-        [[1, 2, 5, 6]],
+        # [[1, 5, 9, 13], [4, 5, 6, 7]],
+        [[1, 5, 9], [4, 5, 6]],
+        # [[4, 5, 9, 10], [2, 6, 5, 9]],
+        # [[6, 7, 9, 10], [1, 5, 6, 10]],
+        [[6, 7, 10], [1, 5, 6]],
+        # [[1, 2, 5, 9], [0, 4, 5, 6], [1, 5, 9, 8], [4, 5, 6, 10]],
+        # [[1, 2, 6, 10], [5, 6, 7, 9], [2, 6, 10, 11], [3, 5, 6, 7]],
+        # [[1, 4, 5, 6], [1, 4, 5, 9], [4, 5, 6, 9], [1, 5, 6, 9]],
+        # [[1, 2, 5, 6]],
     ]
+    tiles = 4
 
     def __init__(self, x, y):
         self.x = x
@@ -48,7 +51,7 @@ class Tetris:
         self.x = 100
         self.y = 60
         self.zoom = 20
-        self.figure = Figure(3, 0)
+        self.figure = Figure(0, 0)
 
         self.height = height
         self.width = width
@@ -62,13 +65,14 @@ class Tetris:
             self.field.append(new_line)
 
     def new_figure(self):
-        self.figure = Figure(3, 0)
+        x = np.random.randint(0, self.width-3)
+        self.figure = Figure(0, 0)
 
     def intersects(self):
         intersection = False
-        for i in range(4):
-            for j in range(4):
-                if i * 4 + j in self.figure.image():
+        for i in range(Figure.tiles):
+            for j in range(Figure.tiles):
+                if i * Figure.tiles + j in self.figure.image():
                     if i + self.figure.y > self.height - 1 or \
                             j + self.figure.x > self.width - 1 or \
                             j + self.figure.x < 0 or \
@@ -91,9 +95,10 @@ class Tetris:
         self.score += lines ** 2
         return lines
 
-    def add_line(self, num_lines, ind):
+    def add_lines(self, num_lines):
         for _ in range(num_lines):
             del self.field[0]
+            ind = np.random.randint(self.width)
             self.field.append([1 if i != ind else 0 for i in range(self.width)])
 
     def go_space(self):
@@ -111,9 +116,9 @@ class Tetris:
 
     def freeze(self):
         lines = 0
-        for i in range(4):
-            for j in range(4):
-                if i * 4 + j in self.figure.image():
+        for i in range(Figure.tiles):
+            for j in range(Figure.tiles):
+                if i * Figure.tiles + j in self.figure.image():
                     self.field[i + self.figure.y][j + self.figure.x] = 1
         lines += self.break_lines()
         self.new_figure()
@@ -142,21 +147,23 @@ class TetrisEnv(ParallelEnv):
         self._max_num_agents = num_players
         self.possible_agents = [f"player_{i}" for i in range(num_players)]
         self.agents = self.possible_agents[:]
-        self.action_space = Discrete(6)
+        self.action_space = Discrete(5)
         self.pad = (shape[0] - shape[1]) // 2
+        self.shape = shape
+        self.envs = {self.possible_agents[i]: Tetris(height=shape[0], width=shape[1]) for i in range(num_players)}
+
         shape = (shape[0], shape[0])
         self.observation_space = Box(0, 1, (1 if not full_obs else num_players,) + shape)
         self.action_spaces = {agent: self.action_space for agent in self.possible_agents}
         self.observation_spaces = {agent: self.observation_space for agent in self.possible_agents}
 
         self.garbage = {2: 1, 3: 2, 4: 4}
-        self.targeting = {self.possible_agents[i]: self.agents[-i] for i in range(num_players)}
-        self.max_timestep = 1000
+        self.targeting = {self.possible_agents[i]: self.agents[-(i + 1)] for i in range(num_players)}
+        self.max_timestep = 500
         self.time = self.max_timestep
         self.full_obs = full_obs
         self.finished = {agent: False for agent in self.possible_agents}
 
-        self.envs = {self.possible_agents[i]: Tetris(*shape) for i in range(num_players)}
 
     def step(self, actions):
         next_obs = {}
@@ -176,21 +183,22 @@ class TetrisEnv(ParallelEnv):
                     self.envs[agent].go_side(-1)
                 elif action == 3:
                     self.envs[agent].rotate()
-                elif action == 4:
+                if action < 4:
                     lines += self.envs[agent].go_down()
-                elif action == 5:
-                    lines += self.envs[agent].go_space()
-
-                lines += self.envs[agent].go_down()
+                else:
+                    if action == 4:
+                        lines += self.envs[agent].go_down()
+                    elif action == 5:
+                        lines += self.envs[agent].go_space()
 
             garbage = self.garbage[lines] if lines >= 2 else 0
             if lines > 0:
-                if any(1 not in line for line in self.envs[agent].field):
+                if all(1 not in line for line in self.envs[agent].field):
                     garbage += 4
                 target = self.targeting[agent]
                 if target != agent:
                     self.envs[target].add_lines(garbage)
-                reward[agent] += garbage * 10
+                reward[agent] += lines ** 2 * 10
             if self.envs[agent].done:
                 termination[agent] = True
                 if not self.finished[agent]:
@@ -210,7 +218,8 @@ class TetrisEnv(ParallelEnv):
         for i, agent in enumerate(self.possible_agents):
             if self.envs[agent].done:
                 completed_envs += 1
-            not_complete = i
+            else:
+                not_complete = i
         if completed_envs == self.max_num_agents - 1 and self.max_num_agents > 1:
             reward[self.possible_agents[not_complete]] += 100
             termination[self.possible_agents[not_complete]] = True
@@ -222,11 +231,11 @@ class TetrisEnv(ParallelEnv):
     def reset(self, seed=None, options=None):
         obs = {}
         self.agents = self.possible_agents[:]
-        self.targeting = {self.possible_agents[i]: self.agents[-i] for i in range(self.max_num_agents)}
+        self.targeting = {self.possible_agents[i]: self.agents[-(i + 1)] for i in range(self.max_num_agents)}
         self.finished = {agent: False for agent in self.possible_agents}
         self.time = self.max_timestep
         for agent in self.possible_agents:
-            self.envs[agent].__init__()
+            self.envs[agent].__init__(height=self.shape[0], width=self.shape[1])
 
         for agent in self.possible_agents:
             obs[agent] = self.get_obs(agent)
@@ -237,8 +246,8 @@ class TetrisEnv(ParallelEnv):
         if not self.full_obs:
             obs = [np.pad(self.envs[agent].field, ((0, 0), (self.pad, self.pad)))]
         else:
-            obs = [np.pad(self.envs[(i + self.possible_agents.index(agent)) % self.max_num_agents].field,
-                          ((0, 0), (self.pad, self.pad))) for i in range(self.max_num_agents)]
+            obs = [np.pad(self.envs[self.possible_agents[i]].field,((0, 0), (self.pad, self.pad)))
+                   for i in range(self.max_num_agents)]
         return np.asarray(obs)
 
     def handle_targeting(self):
@@ -248,36 +257,38 @@ class TetrisEnv(ParallelEnv):
                 active_agents.append(agent)
         self.targeting = {active_agents[i]: active_agents[-i] for i in range(len(active_agents))}
 
-    def render(self, agent=0):
-        pygame.init()
+    def render(self):
         if self.screen is None:
+            pygame.init()
             self.screen = pygame.display.set_mode(size)
+        pygame.event.get()
 
         self.screen.fill(WHITE)
 
-        game = self.envs[self.possible_agents[agent]]
+        for agent_num, agent in enumerate(self.possible_agents):
+            game = self.envs[agent]
 
-        for i in range(game.height):
-            for j in range(game.width):
-                pygame.draw.rect(self.screen, GRAY, [game.x + game.zoom * j, game.y + game.zoom * i, game.zoom, game.zoom],
-                                 1)
-                if game.field[i][j] > 0:
-                    pygame.draw.rect(self.screen, BLACK,
-                                     [game.x + game.zoom * j + 1, game.y + game.zoom * i + 1, game.zoom - 2,
-                                      game.zoom - 1])
-
-        if game.figure is not None:
-            for i in range(4):
-                for j in range(4):
-                    p = i * 4 + j
-                    if p in game.figure.image():
+            for i in range(game.height):
+                for j in range(game.width):
+                    pygame.draw.rect(self.screen, GRAY, [agent_num * game.x + game.x + game.zoom * j,
+                                                         game.y + game.zoom * i, game.zoom, game.zoom], 1)
+                    if game.field[i][j] > 0:
                         pygame.draw.rect(self.screen, BLACK,
-                                         [game.x + game.zoom * (j + game.figure.x) + 1,
-                                          game.y + game.zoom * (i + game.figure.y) + 1,
-                                          game.zoom - 2, game.zoom - 2])
+                                         [agent_num * game.x + game.x + game.zoom * j + 1,
+                                          game.y + game.zoom * i + 1, game.zoom - 2, game.zoom - 1])
+
+            if game.figure is not None:
+                for i in range(Figure.tiles):
+                    for j in range(Figure.tiles):
+                        p = i * Figure.tiles + j
+                        if p in game.figure.image():
+                            pygame.draw.rect(self.screen, BLACK,
+                                             [agent_num * game.x + game.x + game.zoom * (j + game.figure.x) + 1,
+                                              game.y + game.zoom * (i + game.figure.y) + 1,
+                                              game.zoom - 2, game.zoom - 2])
 
         pygame.display.flip()
-        time.sleep(0.1)
+        time.sleep(0.01)
 
     def close(self):
         pygame.display.quit()

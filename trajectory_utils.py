@@ -1,4 +1,26 @@
 import numpy as np
+import argparse
+import os
+from copy import deepcopy
+from typing import Optional, Tuple
+
+import gymnasium as gym
+import numpy as np
+import torch
+from torch.utils.tensorboard import SummaryWriter
+
+from tianshou.data import Collector, VectorReplayBuffer
+from tianshou.env import DummyVectorEnv, SubprocVectorEnv
+from tianshou.env.pettingzoo_env import PettingZooEnv
+from tianshou.policy import (
+    BasePolicy,
+    DQNPolicy,
+    MultiAgentPolicyManager,
+    RandomPolicy,
+)
+from tianshou.trainer import offpolicy_trainer
+from tianshou.utils import TensorboardLogger
+from tianshou.utils.net.common import Net
 
 
 def generate_trajectory(env, agent):
@@ -41,7 +63,7 @@ def evaluate_trajectory(env, agent):
 
 
 def generate_trajectory_pz(env, agents):
-    obs = env.reset()
+    obs, _ = env.reset()
     terminations = {agent: False for agent in env.possible_agents}
     truncations = {agent: False for agent in env.possible_agents}
     total_rewards = {agent: 0 for agent in env.possible_agents}
@@ -73,7 +95,7 @@ def generate_trajectory_pz(env, agents):
 
 
 def evaluate_trajectory_pz(env, agents, render=False):
-    obs = env.reset()
+    obs, _ = env.reset()
     terminations = {agent: False for agent in env.possible_agents}
     truncations = {agent: False for agent in env.possible_agents}
     total_rewards = {agent: 0 for agent in env.possible_agents}
@@ -88,7 +110,7 @@ def evaluate_trajectory_pz(env, agents, render=False):
             if truncations[agent] or terminations[agent]:
                 action[agent] = None
             else:
-                action[agent] = agents[i].choose_action(obs[agent])
+                action[agent] = agents[i].choose_action(obs[agent], explore=False)
 
         next_obs, reward, terminations, truncations, info = env.step(action)
 
@@ -100,3 +122,104 @@ def evaluate_trajectory_pz(env, agents, render=False):
         env.close()
 
     return total_rewards
+
+
+def tianshou_eval(train_env, network, test_env=None):
+    def get_env(env):
+        return lambda: PettingZooEnv(env)
+
+    def get_agents():
+        env = train_env
+        observation_space = env.observation_space(env.agents[0])
+        agents = []
+        for _ in env.possible_agents:
+            # model
+            net = deepcopy(network)
+
+            optim = torch.optim.Adam(net.parameters(), lr=1e-4)
+            agent_learn = DQNPolicy(
+                net,
+                optim,
+                discount_factor=0.99,
+                estimation_step=4,
+                target_update_freq=10000
+            )
+            agents.append(agent_learn)
+
+        policy = MultiAgentPolicyManager(agents, PettingZooEnv(train_env))
+        return policy, agents
+
+    def train_agent(
+    ) -> Tuple[dict, BasePolicy]:
+
+        # ======== environment setup =========
+        train_envs = DummyVectorEnv([get_env(train_env) for _ in range(8)])
+        test_envs = DummyVectorEnv([get_env(test_env) if test_env is not None else get_env(train_env)
+                                    for _ in range(1)])
+
+        # ======== agent setup =========
+        policy, agents = get_agents()
+
+        # ======== collector setup =========
+        train_collector = Collector(
+            policy,
+            train_envs,
+            VectorReplayBuffer(int(1e6), len(train_envs)),
+            exploration_noise=True
+        )
+        test_collector = Collector(policy, test_envs, exploration_noise=True)
+
+        # ======== tensorboard logging setup =========
+        log_path = os.path.join('logdir', 'tic_tac_toe', 'dqn')
+        writer = SummaryWriter(log_path)
+        logger = TensorboardLogger(writer)
+
+        # ======== callback functions used during training =========
+        def save_best_fn(policy):
+            model_save_path = os.path.join(
+                'logdir', 'tic_tac_toe', 'dqn', 'policy.pth'
+            )
+            torch.save(
+               agents[0].state_dict(), model_save_path
+            )
+
+        def stop_fn(mean_rewards):
+            return mean_rewards >= 500
+
+        def train_fn(epoch, env_step):
+            train_eps = max(0.99 ** (env_step / 8), 0.05)
+            for i in range(len(agents)):
+                agents[i].set_eps(train_eps)
+            agents[0].set_eps(1)
+
+        def test_fn(epoch, env_step):
+            for i in range(len(agents)):
+                agents[i].set_eps(0)
+            agents[0].set_eps(1)
+
+        def reward_metric(rews):
+            return rews[:, 1]
+
+        # trainer
+        result = offpolicy_trainer(
+            policy,
+            train_collector,
+            test_collector,
+            max_epoch=int(1e4),
+            step_per_epoch=1000 * len(train_envs),
+            step_per_collect=4,
+            batch_size=256,
+            episode_per_test=len(test_envs),
+            train_fn=train_fn,
+            test_fn=test_fn,
+            stop_fn=stop_fn,
+            save_best_fn=save_best_fn,
+            update_per_step=1,
+            logger=logger,
+            test_in_train=False,
+            reward_metric=reward_metric
+        )
+
+        return result, agents[0]
+
+    return train_agent()

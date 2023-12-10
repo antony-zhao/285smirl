@@ -81,7 +81,7 @@ class Critic(nn.Module):
 
         self.action = nn.Linear(out_features, num_actions.n).to(self.device)
 
-    def forward(self, obs):
+    def forward(self, obs, state=None, info=None):
         if type(obs) is np.ndarray:
             obs = torch.tensor(obs).float().to(self.device)
 

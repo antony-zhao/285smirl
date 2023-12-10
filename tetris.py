@@ -142,6 +142,8 @@ class Tetris:
 
 class TetrisEnv(ParallelEnv):
     # Currently designed for 2 agents but can be expanded to more
+    metadata = {"render_modes": ["human"], "name": "tetris"}
+
     def __init__(self, num_players=1, shape=(20, 10), full_obs=False):
         self.screen = None
         self._max_num_agents = num_players
@@ -163,6 +165,8 @@ class TetrisEnv(ParallelEnv):
         self.time = self.max_timestep
         self.full_obs = full_obs
         self.finished = {agent: False for agent in self.possible_agents}
+        self.info = {agent: {} for agent in self.agents}
+
 
 
     def step(self, actions):
@@ -170,7 +174,6 @@ class TetrisEnv(ParallelEnv):
         reward = {}
         termination = {}
         truncation = {}
-        info = {}
         for agent, action in actions.items():
             lines = 0
             reward[agent] = 1
@@ -212,7 +215,6 @@ class TetrisEnv(ParallelEnv):
             else:
                 truncation[agent] = False
             next_obs[agent] = self.get_obs(agent)
-            info[agent] = None
         completed_envs = 0
         not_complete = 0
         for i, agent in enumerate(self.possible_agents):
@@ -226,7 +228,7 @@ class TetrisEnv(ParallelEnv):
 
         self.time -= 1
 
-        return next_obs, reward, termination, truncation, info
+        return next_obs, reward, termination, truncation, self.info
 
     def reset(self, seed=None, options=None):
         obs = {}
@@ -240,7 +242,7 @@ class TetrisEnv(ParallelEnv):
         for agent in self.possible_agents:
             obs[agent] = self.get_obs(agent)
 
-        return obs
+        return obs, self.info
 
     def get_obs(self, agent):
         if not self.full_obs:

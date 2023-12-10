@@ -1,18 +1,30 @@
+from copy import deepcopy
+
 import gymnasium as gym
 import numpy as np
 
-from SMIRL_VAEAgent import SMIRL_VAEAgent
+from pettingzoo.atari import pong_v3
 from DQNAgent import DQNAgent
 from matplotlib import pyplot as plt
 from trajectory_utils import generate_trajectory, evaluate_trajectory_pz, generate_trajectory_pz
 from tetris import TetrisEnv
 from wrapper import SMIRLWrapper
 from buffer import BernoulliBuffer, ReplayBuffer
+from pettingzoo.utils import aec_to_parallel
+import supersuit as ss
 
-env = SMIRLWrapper(TetrisEnv(shape=(20, 4), num_players=2, full_obs=True), BernoulliBuffer,
+pong = pong_v3.env(num_players=2, obs_type='grayscale_image', full_action_space=False)
+pong = ss.max_observation_v0(pong, 2)
+pong = ss.frame_skip_v0(pong, 4)
+pong = ss.resize_v1(pong, 84, 84)
+pong = ss.frame_stack_v1(pong, 4)
+pong = aec_to_parallel(pong)
+
+env = SMIRLWrapper(deepcopy(pong), BernoulliBuffer,
                    use_reward=[True, "only"], smirl_coeff=0.1)
-eval_env = SMIRLWrapper(TetrisEnv(shape=(20, 4), num_players=2, full_obs=True), BernoulliBuffer,
+eval_env = SMIRLWrapper(deepcopy(pong), BernoulliBuffer,
                         use_reward="only", max_timestep=None)
+
 obs_space = env.observation_space(env.possible_agents[0])
 num_actions = env.action_space(env.possible_agents[0])
 agent_1 = DQNAgent(obs_space, num_actions, lr=1e-4, update_freq=1, start_after=10000,

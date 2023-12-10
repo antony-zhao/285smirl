@@ -39,8 +39,8 @@ class SMIRLWrapper(ParallelEnv):
         next_obs, reward, terminations, truncations, info = self.env.step(action)
         if self._max_timestep is not None:
             if False not in terminations.values():
-                next_obs = self.env.reset()
-            terminations = {agent: False for agent in terminations.keys()}
+                next_obs, _ = self.env.reset()
+                terminations = {agent: False for agent in terminations.keys()}
         for agent in self.possible_agents:
             info[agent] = {"entropy": -self.buffers[agent].smirl_reward(next_obs[agent])}
             if type(self.use_reward) is dict:
@@ -52,18 +52,18 @@ class SMIRLWrapper(ParallelEnv):
                     reward[agent] += self.buffers[agent].smirl_reward(next_obs[agent])
                 else:
                     reward[agent] = self.buffers[agent].smirl_reward(next_obs[agent])
-            self.buffers[agent].insert(next_obs[agent])
+                self.buffers[agent].insert(next_obs[agent])
         if self._time == self._max_timestep:
             truncations = {agent: True for agent in truncations.keys()}
         return self.encode_obs(next_obs), reward, terminations, truncations, info
 
     def reset(self, seed=None, options=None):
         self._time = 0
-        obs = self.env.reset(seed, options)
+        obs, info = self.env.reset(seed, options)
         for agent in self.possible_agents:
             self.buffers[agent].reset()
-            self.buffers[agent].insert(obs[agent])
-        return self.encode_obs(obs)
+            self.buffers[agent].insert(obs[agent][0])
+        return self.encode_obs(obs), info
 
     def close(self):
         self.env.close()
@@ -79,5 +79,5 @@ class SMIRLWrapper(ParallelEnv):
         else:
             time_obs = np.ones(shape=(1, obs_space[1], obs_space[2])) * self._time
 
-        obs = {agent: np.concatenate([obs[agent], params[agent], time_obs]) for agent in obs.keys()}
+        obs = {agent: np.concatenate([obs[agent], params[agent], time_obs]).astype(np.float32) for agent in obs.keys()}
         return obs

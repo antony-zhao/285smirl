@@ -49,13 +49,13 @@ losses = {agent: [] for agent in env.possible_agents}
 train_rewards = {agent: [] for agent in env.possible_agents}
 reward_temp = {agent: [] for agent in env.possible_agents}
 timestep = 0
-for ep in range(10000):
+for ep in range(1000):
     info = generate_trajectory_pz(env, [agent_1, agent_2])
     timestep += info["timestep"]
     for agent in env.possible_agents:
         losses[agent].append(info["loss"][agent])
         reward_temp[agent].append(info["total_reward"][agent])
-    if ep % 100 == 0:
+    if ep % 50 == 0:
         print("Train Reward: ", {agent: np.mean(reward_temp[agent]) for agent in env.possible_agents})
         total_reward = evaluate_trajectory_pz(eval_env, [agent_1, agent_2], render=True)
         print(f"Episode {ep}: Reward {total_reward} Timestep {timestep} Eps {agent_1.eps}")

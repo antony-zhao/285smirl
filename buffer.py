@@ -41,11 +41,12 @@ class PrioritizedReplayBuffer(ReplayBuffer):
 
 
 class SMIRLBuffer:
-    def __init__(self, obs_space, capacity=1_000_000, reward_thresh=300, smirl_coeff=0.5):
+    def __init__(self, obs_space, capacity=1_000_000, reward_thresh=300, smirl_coeff=0.5, frame_stacked=False):
         self.capacity = capacity
         self.obs_space = obs_space
         self.reward_thresh = reward_thresh
         self.reward_multiplier = smirl_coeff
+        self.frame_stacked = frame_stacked
 
     def insert(self, obs):
         raise NotImplementedError
@@ -92,4 +93,43 @@ class BernoulliBuffer(SMIRLBuffer):
 
     def reset(self):
         self.obs_cum = np.zeros(self.obs_space.shape)
+        self.current_size = 0
+
+
+class GaussianBuffer(SMIRLBuffer):
+    def __init__(self, obs_space, capacity=1_000_000, reward_thresh=300, smirl_coeff=0.1, frame_stacked=True):
+        super().__init__(obs_space, capacity, reward_thresh, smirl_coeff, frame_stacked)
+        self.threshold = 1e-4
+        self.current_size = 0
+        if self.frame_stacked:
+            self.buffer = np.zeros((1, 1, obs_space.shape[1], obs_space.shape[2]))
+        else:
+            self.buffer = np.zeros((1, *obs_space.shape))
+
+    def get_params(self):
+        mean, std = np.mean(self.buffer, axis=0), np.std(self.buffer, axis=0)
+        std = np.clip(std, self.threshold, None)
+        return np.vstack([mean, std])
+
+    def log_probs(self, obs):
+        mean, std = np.mean(self.buffer, axis=0), np.std(self.buffer, axis=0)
+        std = np.clip(std, self.threshold, None)
+
+        if not self.frame_stacked:
+            log_prob = (-0.5 * np.mean(np.log(2 * np.pi) + 2 * np.log(std) + np.square((obs - mean) / std))
+                        / np.prod(obs.shape))
+        else:
+            log_prob = (-0.5 * np.mean(np.log(2 * np.pi) + 2 * np.log(std) + np.square((obs[-1] - mean) / std))
+                        / np.prod(obs[-1].shape))
+        return log_prob
+
+    def insert(self, obs):
+        self.buffer = np.concatenate((self.buffer, obs[np.newaxis, np.newaxis, -1]), axis=0)
+        self.current_size += 1
+
+    def reset(self):
+        if self.frame_stacked:
+            self.buffer = np.zeros((1, 1, self.obs_space.shape[1], self.obs_space.shape[2]))
+        else:
+            self.buffer = np.zeros((1, *self.obs_space.shape))
         self.current_size = 0

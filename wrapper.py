@@ -1,15 +1,17 @@
 import numpy as np
 from pettingzoo import ParallelEnv
+from pettingzoo.utils.env import AgentID
+
 from buffer import SMIRLBuffer
 from gymnasium.spaces import Box
 
 
-def encoded_space(obs_space):
+def encoded_space(obs_space, buffer):
     shape = obs_space.shape
     if len(shape) == 1:
-        shape = (shape[0] * 2 + 1,)
+        shape = (shape[0] + buffer.get_params().shape[0] + 1,)
     else:
-        shape = (shape[0] * 2 + 1, shape[1], shape[2])
+        shape = (shape[0] + buffer.get_params().shape[0] + 1, shape[1], shape[2])
     low = np.min(obs_space.low)
     high = np.max(obs_space.high)
 
@@ -20,8 +22,10 @@ class SMIRLWrapper(ParallelEnv):
     def __init__(self, env, buffer=SMIRLBuffer, use_reward=False, max_timestep=500, smirl_coeff=1):
         self.env = env
         old_observation_spaces = self.observation_spaces.copy()
+        self.augmented_spaces = {}
         for agent in self.possible_agents:
-            self.observation_spaces[agent] = encoded_space(old_observation_spaces[agent])
+            self.augmented_spaces[agent] = encoded_space(old_observation_spaces[agent],
+                                                         buffer(old_observation_spaces[agent]))
         self.buffers = {agent: buffer(old_observation_spaces[agent], smirl_coeff=smirl_coeff)
                         for agent in self.possible_agents}
         self._max_timestep = max_timestep
@@ -62,7 +66,10 @@ class SMIRLWrapper(ParallelEnv):
         obs, info = self.env.reset(seed, options)
         for agent in self.possible_agents:
             self.buffers[agent].reset()
-            self.buffers[agent].insert(obs[agent][0])
+            if type(obs) is tuple:
+                self.buffers[agent].insert(obs[agent][0])
+            else:
+                self.buffers[agent].insert(obs[agent])
         return self.encode_obs(obs), info
 
     def close(self):
@@ -81,3 +88,6 @@ class SMIRLWrapper(ParallelEnv):
 
         obs = {agent: np.concatenate([obs[agent], params[agent], time_obs]).astype(np.float32) for agent in obs.keys()}
         return obs
+
+    def observation_space(self, agent):
+        return self.augmented_spaces[agent]

@@ -119,8 +119,7 @@ class GaussianBuffer(SMIRLBuffer):
             log_prob = (-0.5 * np.mean(np.log(2 * np.pi) + 2 * np.log(std) + np.square((obs - mean) / std))
                         / np.prod(obs.shape))
         else:
-            log_prob = (-0.5 * np.mean(np.log(2 * np.pi) + 2 * np.log(std) + np.square((obs[-1] - mean) / std))
-                        / np.prod(obs[-1].shape))
+            log_prob = -0.5 * np.mean(np.log(2 * np.pi) + 2 * np.log(std) + np.square((obs[-1] - mean) / std))
         return log_prob
 
     def insert(self, obs):

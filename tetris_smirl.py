@@ -10,7 +10,7 @@ from wrapper import SMIRLWrapper
 from buffer import BernoulliBuffer, ReplayBuffer
 
 env = SMIRLWrapper(TetrisEnv(shape=(20, 4), num_players=2, full_obs=True), BernoulliBuffer,
-                   use_reward=[True, "only"], smirl_coeff=0.1)
+                   use_reward="only", smirl_coeff=0.1)
 eval_env = SMIRLWrapper(TetrisEnv(shape=(20, 4), num_players=2, full_obs=True), BernoulliBuffer,
                         use_reward="only", max_timestep=None)
 obs_space = env.observation_space(env.possible_agents[0])

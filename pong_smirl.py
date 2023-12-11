@@ -13,8 +13,11 @@ from buffer import BernoulliBuffer, ReplayBuffer, GaussianBuffer
 from pettingzoo.utils import aec_to_parallel
 import supersuit as ss
 
-pong_train = pong_v3.env(num_players=2, obs_type='grayscale_image', full_action_space=False)
-pong_eval = pong_v3.env(num_players=2, obs_type='grayscale_image', full_action_space=False, render_mode='human')
+pong_train = pong_v3.env(num_players=2, obs_type='grayscale_image', full_action_space=False, max_cycles=1000)
+pong_eval = pong_v3.env(num_players=2, obs_type='grayscale_image', full_action_space=False, render_mode='human',
+                        max_cycles=1000)
+
+
 def pong_wrappers(pong):
     pong = ss.dtype_v0(pong, np.float32)
     pong = ss.normalize_obs_v0(pong)
@@ -26,6 +29,7 @@ def pong_wrappers(pong):
     pong = aec_to_parallel(pong)
     return pong
 
+
 env = SMIRLWrapper(pong_wrappers(pong_train), GaussianBuffer,
                    use_reward=[True, "only"], smirl_coeff=0.1, max_timestep=1000)
 eval_env = SMIRLWrapper(pong_wrappers(pong_eval), GaussianBuffer,
@@ -34,24 +38,24 @@ eval_env = SMIRLWrapper(pong_wrappers(pong_eval), GaussianBuffer,
 obs_space = env.observation_space(env.possible_agents[0])
 num_actions = env.action_space(env.possible_agents[0])
 agent_1 = DQNAgent(obs_space, num_actions, lr=1e-4, update_freq=1, start_after=10000,
-                 batch_size=256, target_update_freq=20000, eps_decay_per=500, buffer=ReplayBuffer,
-                 filters=[[16, 5, 2], [32, 3, 2], [64, 2, 2]], normalize_rewards=False, capacity=int(1e5))
+                   batch_size=256, target_update_freq=20000, eps_decay_per=2000, buffer=ReplayBuffer,
+                   filters=[[16, 5, 2], [32, 3, 2], [64, 2, 2]], normalize_rewards=False, capacity=int(1e5))
 agent_2 = DQNAgent(obs_space, num_actions, lr=1e-4, update_freq=1, start_after=10000,
-                 batch_size=256, target_update_freq=20000, eps_decay_per=500, buffer=ReplayBuffer,
-                 filters=[[16, 5, 2], [32, 3, 2], [64, 2, 2]], normalize_rewards=False, capacity=int(1e5))
+                   batch_size=256, target_update_freq=20000, eps_decay_per=2000, buffer=ReplayBuffer,
+                   filters=[[16, 5, 2], [32, 3, 2], [64, 2, 2]], normalize_rewards=False, capacity=int(1e5))
 
 rewards = {agent: [] for agent in env.possible_agents}
 losses = {agent: [] for agent in env.possible_agents}
 train_rewards = {agent: [] for agent in env.possible_agents}
 reward_temp = {agent: [] for agent in env.possible_agents}
 timestep = 0
-for ep in range(1000):
+for ep in range(10000):
     info = generate_trajectory_pz(env, [agent_1, agent_2])
     timestep += info["timestep"]
     for agent in env.possible_agents:
         losses[agent].append(info["loss"][agent])
         reward_temp[agent].append(info["total_reward"][agent])
-    if ep % 50 == 0:
+    if ep % 100 == 0:
         print("Train Reward: ", {agent: np.mean(reward_temp[agent]) for agent in env.possible_agents})
         total_reward = evaluate_trajectory_pz(eval_env, [agent_1, agent_2], render=True)
         print(f"Episode {ep}: Reward {total_reward} Timestep {timestep} Eps {agent_1.eps}")

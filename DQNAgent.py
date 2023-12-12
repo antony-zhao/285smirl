@@ -4,39 +4,44 @@ from torch import nn
 from torch import optim
 from torch.nn import functional as F
 
-from model import Critic
-from buffer import ReplayBuffer, PrioritizedReplayBuffer
+from model import Critic, cuda_available
+from buffer import ReplayBuffer
+
 
 # TODO Better handling of hyperparameters (preferably some args dict that can be used for both DQN and SMIRL)
 
 class DQNAgent:
     def __init__(self, obs_space, num_actions, lr=1e-4, soft_update=None, gamma=0.99,
-                 eps_decay=0.99, buffer=ReplayBuffer, capacity=None, batch_size=256, update_freq=4,
-                 start_after=5000, eps_min=0.1, target_update_freq=10000):
+                 eps_decay=0.99, buffer=ReplayBuffer, capacity=None, normalize_rewards=False, batch_size=256, update_freq=4,
+                 start_after=5000, eps_min=0.1, target_update_freq=10000, eps_decay_per=1000,
+                 use_gpu_if_available=True, filters=None):
         self.update_freq = update_freq
         self.obs_shape = obs_space.shape
         self.num_actions = num_actions.n
-        self.Q = Critic(obs_space, num_actions)
-        self.target_Q = Critic(obs_space, num_actions)
+        self.Q = Critic(obs_space, num_actions, use_gpu_if_available, filters)
+        self.target_Q = Critic(obs_space, num_actions, use_gpu_if_available, filters)
+
+        self.device = cuda_available if use_gpu_if_available else "cpu"
         self.target_Q.load_state_dict(self.Q.state_dict())
-        self.eps_decay = eps_decay
+        self.eps_decay = lambda step: max(eps_decay ** (step // eps_decay_per), eps_min)
         self.eps = 1
-        self.eps_min = eps_min
+
         self.gamma = gamma
         self.tau = soft_update
         self.batch_size = batch_size
         self.step = 0
         if capacity is None:
-            self.buffer = buffer(obs_space)
+            self.buffer = buffer(obs_space, normalize_rewards=normalize_rewards)
         else:
-            self.buffer = buffer(obs_space, capacity)
+            self.buffer = buffer(obs_space, capacity, normalize_rewards=normalize_rewards)
         self.optim = optim.Adam(self.Q.parameters(), lr=lr)
         self.start_after = start_after
         self.target_update_freq = target_update_freq
         self.loss = nn.MSELoss()
 
-    def choose_action(self, obs, eps=0.1):
-        if np.random.rand() > eps:
+    def choose_action(self, obs, explore=True):
+        self.eps = self.eps_decay(self.step)
+        if np.random.rand() > self.eps or explore is False:
             qa_values = self.Q(obs)
             qa_values = qa_values.detach().cpu().numpy()
             return np.argmax(qa_values)
@@ -45,11 +50,11 @@ class DQNAgent:
 
     def update_Q(self):
         obs, action, reward, next_obs, done = self.buffer.sample(self.batch_size)
-        obs = torch.tensor(obs).float()
-        action = torch.tensor(action, dtype=torch.int64)
-        reward = torch.tensor(reward).float()
-        next_obs = torch.tensor(next_obs).float()
-        done = torch.tensor(done)
+        obs = torch.tensor(obs).float().to(self.device)
+        action = torch.tensor(action, dtype=torch.int64).to(self.device)
+        reward = torch.tensor(reward).float().to(self.device)
+        next_obs = torch.tensor(next_obs).float().to(self.device)
+        done = torch.tensor(done).to(self.device)
         with torch.no_grad():
             next_qa_values = self.target_Q(next_obs)
 
